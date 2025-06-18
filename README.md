@@ -30,7 +30,7 @@ or directly from a CDN:
 
 ```html
 <script type="module">
-  import consoleToDOM from 'https://unpkg.com/console-to-dom/dist/esm/console-to-dom.js';
+  import consoleToDOM from 'https://esm.sh/@weyvern/console-to-dom';
   consoleToDOM();
 </script>
 ```
