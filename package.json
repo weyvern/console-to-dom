@@ -1,6 +1,6 @@
 {
   "name": "@weyvern/console-to-dom",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Pipe console output into any HTMLElement with optional colour‑coding,line numbers and XSS‑safe HTML sanitisation.",
   "type": "module",
   "main": "./dist/cjs/console-to-dom.js",
