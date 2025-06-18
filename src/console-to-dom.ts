@@ -32,6 +32,8 @@ export interface CreateConsoleOverrideOptions {
   classNames?: ConsoleOverrideClassNames;
   /** Whether to append the originating source line to each log line (default: `true`) */
   showLineNumber?: boolean;
+  /** Offset to apply to line number*/
+  offset?: number;
   /** Custom HTML sanitiser to avoid XSS in stringified output */
   sanitiseHTML?: (input: string) => string;
 }
@@ -101,12 +103,11 @@ const customStringify = (
   return sanitiseHTML(String(value));
 };
 
-const extractLocation = (): string => {
+const extractLocation = (offset: number): string => {
   const err = new Error();
   if (!err.stack) return '';
-  const frames = err.stack.split(/\n+/).slice(1); // skip error message line
+  const frames = err.stack.split(/\n+/);
   const skipPattern = /createConsoleOverride|consoleOverride|node_modules|<anonymous>/;
-
   for (const frame of frames) {
     if (skipPattern.test(frame)) continue;
 
@@ -114,14 +115,14 @@ const extractLocation = (): string => {
     const m = frame.match(/(?:at\s+.*?\(|\s*)([\w.:/~-]+?):(\d+):(\d+)/);
     if (m) {
       const [, , line, col] = m;
-      return `main.ts:${line}:${col}`; // Replace file name with deterministic placeholder
+      return `main.ts:${parseInt(line) - offset}:${col}`;
     }
 
     // Safari: func@https://…/file.js:10:15
     const s = frame.match(/@([\w.:/~-]+):(\d+):(\d+)/);
     if (s) {
       const [, , line, col] = s;
-      return `main.ts:${line}:${col}`;
+      return `main.ts:${parseInt(line) - offset}:${col}`;
     }
   }
   return '';
@@ -156,6 +157,7 @@ const makeHandler =
     method: ConsoleMethod,
     classNames: ConsoleOverrideClassNames,
     showLineNumber: boolean,
+    offset: number,
     sanitiseHTML: (input: string) => string,
     emoji?: string
   ): HandleFunction =>
@@ -185,7 +187,7 @@ const makeHandler =
       method,
       classNames,
       html,
-      showLineNumber ? extractLocation() : '',
+      showLineNumber ? extractLocation(offset) : '',
       emoji
     );
     output.appendChild(line);
@@ -212,6 +214,7 @@ const consoleToDOM = ({
   output = document.body,
   classNames = defaultClassNames,
   showLineNumber = true,
+  offset = 0,
   sanitiseHTML = defaultSanitise
 }: CreateConsoleOverrideOptions = {}): void => {
   if (!output) throw new Error("createConsoleOverride › 'output' element not found");
@@ -225,6 +228,7 @@ const consoleToDOM = ({
     'log',
     classNames,
     showLineNumber,
+    offset,
     sanitiseHTML
   );
   console.warn = makeHandler(
@@ -233,6 +237,7 @@ const consoleToDOM = ({
     'warn',
     classNames,
     showLineNumber,
+    offset,
     sanitiseHTML,
     '⚠️'
   );
@@ -242,6 +247,7 @@ const consoleToDOM = ({
     'info',
     classNames,
     showLineNumber,
+    offset,
     sanitiseHTML,
     'ℹ️'
   );
@@ -251,6 +257,7 @@ const consoleToDOM = ({
     'error',
     classNames,
     showLineNumber,
+    offset,
     sanitiseHTML,
     '🚨'
   );
