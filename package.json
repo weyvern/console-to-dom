@@ -1,0 +1,33 @@
+{
+  "name": "@weyvern/console-to-dom",
+  "version": "1.0.1",
+  "description": "Pipe console output into any HTMLElement with optional colour‑coding,line numbers and XSS‑safe HTML sanitisation.",
+  "type": "module",
+  "main": "./dist/cjs/console-to-dom.js",
+  "module": "./dist/esm/console-to-dom.js",
+  "types": "./dist/esm/console-to-dom.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/esm/console-to-dom.js",
+      "require": "./dist/cjs/console-to-dom.js",
+      "types": "./dist/esm/console-to-dom.d.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build:esm": "tsc -p tsconfig.esm.json",
+    "build:cjs": "tsc -p tsconfig.cjs.json",
+    "build": "rm -rf dist && npm run build:esm && npm run build:cjs",
+    "prepublishOnly": "npm run build"
+  },
+  "author": "Jorge Paul",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}
