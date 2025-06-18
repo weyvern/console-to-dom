@@ -1,51 +1,21 @@
-/*
- * Console to DOM
- * -----------------------
- * Pipe console output into any HTMLElement with optional colour‑coding,
- * line numbers and XSS‑safe HTML sanitisation.
- *
- * Example (ESM):
- *   import { createConsoleOverride } from 'console-override';
- *   createConsoleOverride({ output: document.getElementById('out') });
- */
-
-// ────────────────────────────────────────────────────────────────────────────────
-//  Types
-// ────────────────────────────────────────────────────────────────────────────────
 export interface ConsoleOverrideClassNames {
-  /** Wrapper element for every logged line */
   outputLine: string;
-  /** Additional class appended when `console.log` is used */
   log: string;
-  /** Additional class appended when `console.warn` is used */
   warn: string;
-  /** Additional class appended when `console.info` is used */
   info: string;
-  /** Additional class appended when `console.error` is used */
   error: string;
 }
 
 export interface CreateConsoleOverrideOptions {
-  /** Element that receives the rendered log lines (default: `document.body`) */
   output?: HTMLElement;
-  /** Class names used to decorate the DOM elements (see `defaultClassNames`) */
   classNames?: ConsoleOverrideClassNames;
-  /** Whether to append the originating source line to each log line (default: `true`) */
   showLineNumber?: boolean;
-  /** Offset to apply to line number*/
-  offset?: number;
-  /** Custom HTML sanitiser to avoid XSS in stringified output */
   sanitiseHTML?: (input: string) => string;
 }
 
 export type ConsoleMethod = 'log' | 'warn' | 'info' | 'error';
 export type HandleFunction = (...args: unknown[]) => void;
 
-// ────────────────────────────────────────────────────────────────────────────────
-//  Defaults
-// ────────────────────────────────────────────────────────────────────────────────
-
-/** Default class names applied to DOM nodes */
 const defaultClassNames: ConsoleOverrideClassNames = {
   outputLine: 'console-line',
   log: 'console-log',
@@ -54,16 +24,11 @@ const defaultClassNames: ConsoleOverrideClassNames = {
   error: 'console-error'
 };
 
-/** Naïve HTML sanitiser – escapes HTML entities to mitigate XSS */
 const defaultSanitise = (input: string): string => {
   const div = document.createElement('div');
   div.textContent = input;
   return div.innerHTML;
 };
-
-// ────────────────────────────────────────────────────────────────────────────────
-//  Implementation helpers (internal)
-// ────────────────────────────────────────────────────────────────────────────────
 
 const customStringify = (
   value: unknown,
@@ -103,28 +68,24 @@ const customStringify = (
   return sanitiseHTML(String(value));
 };
 
-const extractLocation = (offset: number): string => {
-  const err = new Error();
-  if (!err.stack) return '';
-  const frames = err.stack.split(/\n+/);
-  const skipPattern = /createConsoleOverride|consoleOverride|node_modules|<anonymous>/;
-  for (const frame of frames) {
-    if (skipPattern.test(frame)) continue;
+const extractLocationFromStack = (stack: string): string => {
+  const lastFrame = stack.split(/\n+/).pop()!;
+  const skipPattern = /consoleToDOM|makeHandler|node_modules|vite|<anonymous>|setTimeout/;
 
-    // Chrome / Firefox:   at func (https://…/file.js:10:15)
-    const m = frame.match(/(?:at\s+.*?\(|\s*)([\w.:/~-]+?):(\d+):(\d+)/);
-    if (m) {
-      const [, , line, col] = m;
-      return `main.ts:${parseInt(line) - offset}:${col}`;
-    }
+  if (skipPattern.test(lastFrame)) return '';
 
-    // Safari: func@https://…/file.js:10:15
-    const s = frame.match(/@([\w.:/~-]+):(\d+):(\d+)/);
-    if (s) {
-      const [, , line, col] = s;
-      return `main.ts:${parseInt(line) - offset}:${col}`;
-    }
+  const match = lastFrame.match(/(?:at\s+.*?\(|\s*)(.*?):(\d+):(\d+)/);
+  if (match) {
+    const [, file, line, col] = match;
+    return `${file.split('/').pop()?.split('?')[0]}:${line}:${col}`;
   }
+
+  const safariMatch = lastFrame.match(/@(.*?):(\d+):(\d+)/);
+  if (safariMatch) {
+    const [, file, line, col] = safariMatch;
+    return `${file.split('/').pop()?.split('?')[0]}:${line}:${col}`;
+  }
+
   return '';
 };
 
@@ -152,114 +113,68 @@ const buildOutputLine = (
 
 const makeHandler =
   (
-    originalConsole: Console,
     output: HTMLElement,
     method: ConsoleMethod,
     classNames: ConsoleOverrideClassNames,
     showLineNumber: boolean,
-    offset: number,
     sanitiseHTML: (input: string) => string,
     emoji?: string
   ): HandleFunction =>
   (...args: unknown[]): void => {
     let html = '';
-
+    const stack = args.pop() as string | undefined;
     args.forEach(arg => {
       if (arg instanceof Error) {
         arg = arg.message ?? String(arg);
       }
       if (typeof arg === 'string') {
         html += sanitiseHTML(arg);
-      } else if (
-        typeof arg === 'number' ||
-        typeof arg === 'boolean' ||
-        typeof arg === 'bigint' ||
-        arg === null ||
-        typeof arg === 'undefined'
-      ) {
-        html += `<pre>${customStringify(arg, sanitiseHTML)}</pre>`;
       } else {
         html += `<pre>${customStringify(arg, sanitiseHTML)}</pre>`;
       }
     });
-
-    const line = buildOutputLine(
-      method,
-      classNames,
-      html,
-      showLineNumber ? extractLocation(offset) : '',
-      emoji
-    );
+    const fileAndLine = showLineNumber && stack ? extractLocationFromStack(stack) : '';
+    const line = buildOutputLine(method, classNames, html, fileAndLine, emoji);
     output.appendChild(line);
-
-    // Auto‑scroll to newest entry
     document.documentElement.scrollTo({
       top: document.documentElement.scrollHeight,
       behavior: 'smooth'
     });
-
-    // Preserve original console behaviour asynchronously to keep ordering intact
-    queueMicrotask(originalConsole[method].bind(originalConsole, ...args));
   };
 
-// ────────────────────────────────────────────────────────────────────────────────
-//  Public API
-// ────────────────────────────────────────────────────────────────────────────────
+const createConsoleProxy = (method: ConsoleMethod, handler: HandleFunction): HandleFunction => {
+  return new Proxy(console[method], {
+    apply(_target, _thisArg, args) {
+      const error = new Error();
+      const capturedStack = error.stack;
+      queueMicrotask(_target.bind(console, ...args));
+      handler(...args, capturedStack);
+    }
+  });
+};
 
-/**
- * Overrides the global `console` object and pipes its output into a DOM
- * container of your choice.
- */
 const consoleToDOM = ({
   output = document.body,
   classNames = defaultClassNames,
   showLineNumber = true,
-  offset = 0,
   sanitiseHTML = defaultSanitise
-}: CreateConsoleOverrideOptions = {}): void => {
-  if (!output) throw new Error("createConsoleOverride › 'output' element not found");
-
-  // Preserve native console implementation
-  const originalConsole: Console = { ...console } as Console;
-
-  console.log = makeHandler(
-    originalConsole,
-    output,
+}: CreateConsoleOverrideOptions): void => {
+  if (!output) throw new Error("consoleToDOM › 'output' element not found");
+  console.log = createConsoleProxy(
     'log',
-    classNames,
-    showLineNumber,
-    offset,
-    sanitiseHTML
+    makeHandler(output, 'log', classNames, showLineNumber, sanitiseHTML)
   );
-  console.warn = makeHandler(
-    originalConsole,
-    output,
+  console.warn = createConsoleProxy(
     'warn',
-    classNames,
-    showLineNumber,
-    offset,
-    sanitiseHTML,
-    '⚠️'
+    makeHandler(output, 'warn', classNames, showLineNumber, sanitiseHTML, '⚠️')
   );
-  console.info = makeHandler(
-    originalConsole,
-    output,
+  console.info = createConsoleProxy(
     'info',
-    classNames,
-    showLineNumber,
-    offset,
-    sanitiseHTML,
-    'ℹ️'
+    makeHandler(output, 'info', classNames, showLineNumber, sanitiseHTML, 'ℹ️')
   );
-  console.error = makeHandler(
-    originalConsole,
-    output,
+  console.error = createConsoleProxy(
     'error',
-    classNames,
-    showLineNumber,
-    offset,
-    sanitiseHTML,
-    '🚨'
+    makeHandler(output, 'error', classNames, showLineNumber, sanitiseHTML, '🚨')
   );
 };
 
